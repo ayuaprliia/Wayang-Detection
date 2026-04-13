@@ -101,15 +101,23 @@ fun CharacterDetailScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(320.dp)
                     .graphicsLayer {
                         translationY = scrollState.value * 0.3f
-                    }
+                    },
+                contentAlignment = Alignment.Center
             ) {
+                // Dark background behind image
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+                        .background(BgOverlay)
+                )
                 Image(
                     painter = painterResource(id = character.imageResId),
                     contentDescription = character.name,
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))

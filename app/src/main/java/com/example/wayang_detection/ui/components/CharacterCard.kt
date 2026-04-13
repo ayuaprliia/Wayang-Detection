@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.sp
 import com.example.wayang_detection.data.model.WayangCategory
 import com.example.wayang_detection.data.model.WayangCharacter
 import com.example.wayang_detection.ui.theme.*
-import com.example.wayang_detection.util.compressImage
 
 @Composable
 fun CharacterCard(
@@ -33,13 +32,6 @@ fun CharacterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
-    // 🔥 Compress image once (important!)
-    val bitmap = remember(character.imageResId) {
-        compressImage(context, character.imageResId)
-    }
-
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
@@ -78,16 +70,21 @@ fun CharacterCard(
     ) {
         Column {
 
-            // 🔥 Image (optimized)
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = character.name,
-                contentScale = ContentScale.Crop,
+            // Image — fits full image without cropping
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)
-                    .background(BgOverlay)
-            )
+                    .height(160.dp)
+                    .background(BgOverlay),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = character.imageResId),
+                    contentDescription = character.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Info
             Column(

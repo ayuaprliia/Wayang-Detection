@@ -2,6 +2,7 @@ package com.example.wayang_detection.ui.screens
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,19 +12,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.wayang_detection.R
 import com.example.wayang_detection.ui.theme.*
 import com.example.wayang_detection.util.Constants
 import kotlinx.coroutines.delay
 
 /**
- * Splash screen with animated gunungan (kayon) logo and AI model loading progress.
+ * Splash screen with app logo and AI model loading progress.
  * Auto-navigates to Home after minimum display time.
  */
 @Composable
@@ -36,10 +38,10 @@ fun SplashScreen(
     var titleVisible by remember { mutableStateOf(false) }
 
     // Glow animation
-    val infiniteTransition = rememberInfiniteTransition(label = "gunungan_glow")
+    val infiniteTransition = rememberInfiniteTransition(label = "logo_glow")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 1f,
+        initialValue = 0.4f,
+        targetValue = 0.9f,
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = EaseInOutCubic),
             repeatMode = RepeatMode.Reverse
@@ -71,96 +73,36 @@ fun SplashScreen(
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(48.dp)
+            modifier = Modifier.padding(horizontal = 48.dp)
         ) {
-            // Gunungan (Kayon) logo drawn with Canvas
+            // Logo with golden glow background
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(200.dp)
+                modifier = Modifier.size(240.dp)
             ) {
-                // Glow background
-                Canvas(modifier = Modifier.size(200.dp)) {
+                // Animated radial glow behind logo
+                Canvas(modifier = Modifier.size(240.dp)) {
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                GoldPrimary.copy(alpha = glowAlpha * 0.3f),
-                                GoldPrimary.copy(alpha = glowAlpha * 0.1f),
+                                GoldPrimary.copy(alpha = glowAlpha * 0.25f),
+                                GoldPrimary.copy(alpha = glowAlpha * 0.08f),
                                 GoldPrimary.copy(alpha = 0f)
                             ),
-                            radius = size.minDimension / 1.5f
+                            radius = size.minDimension / 1.3f
                         )
                     )
                 }
 
-                // Gunungan shape
-                Canvas(modifier = Modifier.size(160.dp)) {
-                    val w = size.width
-                    val h = size.height
-
-                    // Main triangular gunungan shape
-                    val path = Path().apply {
-                        moveTo(w / 2, h * 0.05f) // Top point
-                        // Right side with curves
-                        cubicTo(
-                            w * 0.55f, h * 0.2f,
-                            w * 0.75f, h * 0.4f,
-                            w * 0.8f, h * 0.6f
-                        )
-                        cubicTo(
-                            w * 0.85f, h * 0.75f,
-                            w * 0.75f, h * 0.9f,
-                            w * 0.65f, h * 0.95f
-                        )
-                        lineTo(w * 0.35f, h * 0.95f)
-                        // Left side
-                        cubicTo(
-                            w * 0.25f, h * 0.9f,
-                            w * 0.15f, h * 0.75f,
-                            w * 0.2f, h * 0.6f
-                        )
-                        cubicTo(
-                            w * 0.25f, h * 0.4f,
-                            w * 0.45f, h * 0.2f,
-                            w / 2, h * 0.05f
-                        )
-                        close()
-                    }
-
-                    drawPath(
-                        path = path,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                GoldLight.copy(alpha = glowAlpha),
-                                GoldPrimary.copy(alpha = glowAlpha),
-                                GoldDark.copy(alpha = glowAlpha * 0.8f)
-                            )
-                        ),
-                        style = Fill
-                    )
-
-                    // Inner decorative lines
-                    val innerPath = Path().apply {
-                        moveTo(w / 2, h * 0.15f)
-                        lineTo(w / 2, h * 0.85f)
-                    }
-                    drawPath(
-                        path = innerPath,
-                        color = BgPrimary.copy(alpha = 0.3f),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
-                    )
-
-                    // Horizontal ornament lines
-                    for (i in 1..4) {
-                        val y = h * (0.25f + i * 0.12f)
-                        val spread = (i * 0.06f)
-                        drawLine(
-                            color = BgPrimary.copy(alpha = 0.2f),
-                            start = Offset(w / 2 - w * spread, y),
-                            end = Offset(w / 2 + w * spread, y),
-                            strokeWidth = 1.5f
-                        )
-                    }
-                }
+                // App logo image
+                Image(
+                    painter = painterResource(id = R.drawable.logo_wayang_detection),
+                    contentDescription = "WayangVision Logo",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(180.dp)
+                        .graphicsLayer { alpha = glowAlpha * 0.9f + 0.1f }
+                )
             }
 
             Spacer(modifier = Modifier.height(32.dp))

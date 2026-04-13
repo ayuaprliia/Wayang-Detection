@@ -121,16 +121,24 @@ private fun MainScreen() {
                 arguments = listOf(navArgument("mode") { type = NavType.StringType })
             ) { backStackEntry ->
                 val mode = backStackEntry.arguments?.getString("mode") ?: "live"
+                val liveResults by detectionViewModel.liveResults.collectAsState()
+
+                // Sync confidence threshold from settings to detection engine
+                detectionViewModel.confidenceThreshold = confidenceThreshold
+
                 DetectionScreen(
                     mode = mode,
                     onBack = { navController.popBackStack() },
-                    onDetectionResult = { characterId, confidence ->
-                        navController.navigate(Screen.Result.createRoute(characterId, confidence)) {
+                    onNavigateToResult = {
+                        navController.navigate(Screen.Result.route) {
                             popUpTo(Screen.Home.route)
                         }
                     },
                     detectionState = detectionState,
-                    onPerformDetection = { detectionViewModel.performMockDetection() },
+                    liveResults = liveResults,
+                    onProcessFrame = { imageProxy -> detectionViewModel.processFrame(imageProxy) },
+                    onDetectFromUri = { uri -> detectionViewModel.detectFromUri(uri) },
+                    onCaptureResults = { detectionViewModel.captureCurrentResults() },
                     onResetDetection = { detectionViewModel.resetDetection() },
                     devModeEnabled = devModeEnabled,
                     fps = fps,
@@ -141,18 +149,10 @@ private fun MainScreen() {
             }
 
             // ── Result ──
-            composable(
-                route = Screen.Result.route,
-                arguments = listOf(
-                    navArgument("characterId") { type = NavType.StringType },
-                    navArgument("confidence") { type = NavType.FloatType }
-                )
-            ) { backStackEntry ->
-                val characterId = backStackEntry.arguments?.getString("characterId") ?: ""
-                val confidence = backStackEntry.arguments?.getFloat("confidence") ?: 0f
+            composable(route = Screen.Result.route) {
+                val capturedResults by detectionViewModel.capturedResults.collectAsState()
                 ResultScreen(
-                    characterId = characterId,
-                    confidence = confidence,
+                    detectionResults = capturedResults,
                     onBack = { navController.popBackStack() },
                     onViewInEncyclopedia = { id ->
                         navController.navigate(Screen.CharacterDetail.createRoute(id))

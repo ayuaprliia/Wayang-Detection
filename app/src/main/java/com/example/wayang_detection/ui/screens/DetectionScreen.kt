@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -35,25 +37,30 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import coil.compose.rememberAsyncImagePainter
-import com.example.wayang_detection.data.model.BoundingBox
+import com.example.wayang_detection.data.model.DetectionResult
 import com.example.wayang_detection.data.model.DetectionState
 import com.example.wayang_detection.ui.components.BoundingBoxOverlay
 import com.example.wayang_detection.ui.components.DevModeOverlay
 import com.example.wayang_detection.ui.theme.*
+import kotlinx.coroutines.delay
+import java.util.concurrent.Executors
 
 /**
  * Detection screen supporting both live camera and gallery modes.
- * Shows camera preview / selected image with bounding box overlay
- * and developer mode metrics.
+ * Live mode: CameraX ImageAnalysis sends frames for real-time YOLOv11 inference.
+ * Gallery mode: single-shot inference on selected image.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetectionScreen(
     mode: String, // "live" or "gallery"
     onBack: () -> Unit,
-    onDetectionResult: (String, Float) -> Unit,
+    onNavigateToResult: () -> Unit,
     detectionState: DetectionState,
-    onPerformDetection: () -> Unit,
+    liveResults: List<DetectionResult>,
+    onProcessFrame: (ImageProxy) -> Unit,
+    onDetectFromUri: (Uri) -> Unit,
+    onCaptureResults: () -> Unit,
     onResetDetection: () -> Unit,
     devModeEnabled: Boolean,
     fps: Int,
@@ -63,6 +70,12 @@ fun DetectionScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Background executor for CameraX ImageAnalysis
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose { analysisExecutor.shutdown() }
+    }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -77,29 +90,28 @@ fun DetectionScreen(
 
     var flashEnabled by remember { mutableStateOf(false) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var waitingForGalleryResult by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
         selectedImageUri = uri
         if (uri != null) {
-            onPerformDetection()
+            waitingForGalleryResult = true
+            onDetectFromUri(uri)
         }
     }
 
-    // Auto-navigate to result when detection is found
-    LaunchedEffect(detectionState) {
-        if (detectionState is DetectionState.Found) {
-            val result = detectionState.results.firstOrNull()
-            if (result != null) {
-                kotlinx.coroutines.delay(1500)
-                onDetectionResult(result.characterId, result.confidence)
-                onResetDetection()
-            }
+    // Auto-navigate to result for gallery/image detection
+    LaunchedEffect(detectionState, waitingForGalleryResult) {
+        if (waitingForGalleryResult && detectionState is DetectionState.Found) {
+            delay(1000) // Brief display of bounding boxes over image
+            waitingForGalleryResult = false
+            onNavigateToResult()
         }
     }
 
-    // Request camera permission for live mode
+    // Request camera permission for live mode / launch gallery picker
     LaunchedEffect(mode) {
         if (mode == "live" && !hasCameraPermission) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -126,7 +138,7 @@ fun DetectionScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // Camera preview or selected image
+        // Camera preview with ImageAnalysis, or selected image
         if (mode == "live" && hasCameraPermission) {
             AndroidView(
                 factory = { ctx ->
@@ -137,12 +149,24 @@ fun DetectionScreen(
                         val preview = Preview.Builder().build().also {
                             it.surfaceProvider = previewView.surfaceProvider
                         }
+
+                        // ImageAnalysis — sends each frame to ViewModel for YOLOv11 inference
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                            .also { analysis ->
+                                analysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                                    onProcessFrame(imageProxy)
+                                }
+                            }
+
                         try {
                             cameraProvider.unbindAll()
                             cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview
+                                preview,
+                                imageAnalysis
                             )
                         } catch (e: Exception) {
                             e.printStackTrace()
@@ -152,7 +176,7 @@ fun DetectionScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (mode == "gallery" && selectedImageUri != null) {
+        } else if (selectedImageUri != null) {
             Image(
                 painter = rememberAsyncImagePainter(selectedImageUri),
                 contentDescription = "Selected image",
@@ -192,35 +216,40 @@ fun DetectionScreen(
             }
         }
 
-        // Bounding box overlay (when detection found)
-        if (detectionState is DetectionState.Found) {
+        // Real-time bounding box overlay for all detected objects
+        if (liveResults.isNotEmpty()) {
             BoundingBoxOverlay(
-                boundingBoxes = detectionState.results.map { it.boundingBox to it.characterName },
+                boundingBoxes = liveResults.map { it.boundingBox to it.characterName },
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Detection label
-            detectionState.results.firstOrNull()?.let { result ->
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 120.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(BgPrimary.copy(alpha = 0.85f))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "${result.characterName} — ${(result.confidence * 100).toInt()}%",
-                        color = GoldPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            // Detection labels positioned near each bounding box
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                liveResults.forEach { result ->
+                    val labelX = maxWidth * result.boundingBox.left
+                    val rawY = maxHeight * result.boundingBox.top - 28.dp
+                    val labelY = if (rawY < 0.dp) 0.dp else rawY
+
+                    Box(
+                        modifier = Modifier
+                            .offset(x = labelX, y = labelY)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(BgPrimary.copy(alpha = 0.85f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "${result.characterName} ${(result.confidence * 100).toInt()}%",
+                            color = GoldPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }
 
-        // Scanning indicator
-        if (detectionState is DetectionState.Scanning) {
+        // Scanning indicator (only for gallery single-shot inference)
+        if (waitingForGalleryResult && detectionState is DetectionState.Scanning) {
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -311,7 +340,7 @@ fun DetectionScreen(
                     )
                 }
 
-                // Capture/Scan button
+                // Capture button — freezes current detections and navigates to result
                 Box(contentAlignment = Alignment.Center) {
                     // Pulse ring
                     Box(
@@ -322,7 +351,12 @@ fun DetectionScreen(
                     )
                     // Inner button
                     IconButton(
-                        onClick = onPerformDetection,
+                        onClick = {
+                            if (liveResults.isNotEmpty()) {
+                                onCaptureResults()
+                                onNavigateToResult()
+                            }
+                        },
                         modifier = Modifier
                             .size(64.dp)
                             .clip(CircleShape)

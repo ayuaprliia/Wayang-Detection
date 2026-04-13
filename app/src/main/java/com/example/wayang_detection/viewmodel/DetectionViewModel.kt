@@ -1,23 +1,40 @@
 package com.example.wayang_detection.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.camera.core.ImageProxy
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.wayang_detection.data.model.BoundingBox
 import com.example.wayang_detection.data.model.DetectionResult
 import com.example.wayang_detection.data.model.DetectionState
+import com.example.wayang_detection.detector.ImageProcessor
+import com.example.wayang_detection.detector.WayangDetector
 import com.example.wayang_detection.util.Constants
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * ViewModel for detection process.
- * Currently uses mock detection — replace performMockDetection()
- * with real TFLite inference later.
+ * ViewModel for wayang detection using YOLOv11 TFLite model.
+ * Supports real-time camera detection and single-shot gallery detection.
  */
-class DetectionViewModel : ViewModel() {
+class DetectionViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val detector = WayangDetector(application)
+    private val isProcessing = AtomicBoolean(false)
+
+    /** When true, camera frames are skipped (gallery detection in progress). */
+    @Volatile
+    var skipFrameProcessing = false
+        private set
+
+    /** Current confidence threshold from SettingsViewModel. */
+    @Volatile
+    var confidenceThreshold = Constants.DEFAULT_CONFIDENCE_THRESHOLD
 
     private val _detectionState = MutableStateFlow<DetectionState>(DetectionState.Idle)
     val detectionState: StateFlow<DetectionState> = _detectionState.asStateFlow()
@@ -28,40 +45,106 @@ class DetectionViewModel : ViewModel() {
     private val _inferenceTimeMs = MutableStateFlow(0L)
     val inferenceTimeMs: StateFlow<Long> = _inferenceTimeMs.asStateFlow()
 
+    /** Live results for real-time camera overlay (updates every frame). */
+    private val _liveResults = MutableStateFlow<List<DetectionResult>>(emptyList())
+    val liveResults: StateFlow<List<DetectionResult>> = _liveResults.asStateFlow()
+
+    /** Captured results frozen at moment of capture (for ResultScreen). */
+    private val _capturedResults = MutableStateFlow<List<DetectionResult>>(emptyList())
+    val capturedResults: StateFlow<List<DetectionResult>> = _capturedResults.asStateFlow()
+
     /**
-     * Simulates wayang detection with mock data.
-     * TODO: Replace with actual TFLite inference.
+     * Process a single camera frame for real-time detection.
+     * Drops frames if previous inference is still running (keeps UI smooth).
+     * Called by CameraX ImageAnalysis.Analyzer on a background thread.
      */
-    fun performMockDetection() {
-        viewModelScope.launch {
-            _detectionState.value = DetectionState.Scanning
+    fun processFrame(imageProxy: ImageProxy) {
+        // Drop frame if gallery detection is pending or previous frame still processing
+        if (skipFrameProcessing || !isProcessing.compareAndSet(false, true)) {
+            imageProxy.close()
+            return
+        }
 
-            // Simulate inference delay
-            delay(1500L)
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val startTime = System.currentTimeMillis()
 
-            val mockResults = listOf(
-                DetectionResult(
-                    characterId = "bima",
-                    characterName = "Bima",
-                    confidence = 0.952f,
-                    boundingBox = BoundingBox(
-                        left = 0.15f,
-                        top = 0.18f,
-                        right = 0.85f,
-                        bottom = 0.82f
-                    )
-                )
-            )
+                // Convert ImageProxy (YUV) → Bitmap (with rotation correction)
+                val bitmap = ImageProcessor.imageProxyToBitmap(imageProxy)
+                imageProxy.close() // Release camera buffer ASAP
 
-            _detectionState.value = DetectionState.Found(mockResults)
-            _fps.value = Constants.MOCK_FPS
-            _inferenceTimeMs.value = Constants.MOCK_INFERENCE_TIME_MS
+                // Run YOLOv11 inference
+                val results = detector.detect(bitmap, confidenceThreshold)
+                bitmap.recycle()
+
+                val elapsed = System.currentTimeMillis() - startTime
+
+                // Update UI state
+                _liveResults.value = results
+                _inferenceTimeMs.value = elapsed
+                _fps.value = (1000.0 / elapsed.coerceAtLeast(1L)).toInt()
+                _detectionState.value = if (results.isNotEmpty())
+                    DetectionState.Found(results) else DetectionState.Scanning
+            } catch (e: Exception) {
+                e.printStackTrace()
+                imageProxy.close()
+            } finally {
+                isProcessing.set(false)
+            }
         }
     }
 
+    /**
+     * Single-shot detection on an image from gallery/URI.
+     * Pauses camera frame processing while running.
+     */
+    fun detectFromUri(uri: Uri) {
+        skipFrameProcessing = true
+        viewModelScope.launch(Dispatchers.Default) {
+            _detectionState.value = DetectionState.Scanning
+            try {
+                val context = getApplication<Application>()
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (bitmap != null) {
+                    val results = detector.detect(bitmap, confidenceThreshold)
+                    bitmap.recycle()
+
+                    _liveResults.value = results
+                    _capturedResults.value = results
+                    _detectionState.value = if (results.isNotEmpty())
+                        DetectionState.Found(results)
+                    else DetectionState.Error("Tidak ada wayang terdeteksi")
+                } else {
+                    _detectionState.value = DetectionState.Error("Gagal memuat gambar")
+                }
+            } catch (e: Exception) {
+                _detectionState.value = DetectionState.Error("Error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Freeze current live results for the ResultScreen.
+     * Called when user presses capture button in live mode.
+     */
+    fun captureCurrentResults() {
+        _capturedResults.value = _liveResults.value.toList()
+    }
+
     fun resetDetection() {
+        skipFrameProcessing = false
         _detectionState.value = DetectionState.Idle
+        _liveResults.value = emptyList()
+        _capturedResults.value = emptyList()
         _fps.value = 0
         _inferenceTimeMs.value = 0L
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        detector.close()
     }
 }

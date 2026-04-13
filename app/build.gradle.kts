@@ -37,6 +37,9 @@ android {
     buildFeatures {
         compose = true
     }
+    aaptOptions {
+        noCompress += "tflite"
+    }
 }
 
 dependencies {
@@ -69,6 +72,9 @@ dependencies {
 
     // Coil (image loading)
     implementation(libs.coil.compose)
+
+    // LiteRT (on-device inference — replaces TensorFlow Lite)
+    implementation(libs.litert)
 
     // Testing
     testImplementation(libs.junit)

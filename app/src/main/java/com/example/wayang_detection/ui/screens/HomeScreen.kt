@@ -186,40 +186,6 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Stats row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(BgSecondary)
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            StatItem(number = "16", label = "Karakter")
-            StatItem(number = "4", label = "Kategori")
-            StatItem(number = "YOLOv11", label = "Model")
-        }
-
         Spacer(modifier = Modifier.height(100.dp)) // Bottom nav space
-    }
-}
-
-@Composable
-private fun StatItem(number: String, label: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = number,
-            color = GoldPrimary,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = label,
-            color = TextMuted,
-            fontSize = 11.sp
-        )
     }
 }

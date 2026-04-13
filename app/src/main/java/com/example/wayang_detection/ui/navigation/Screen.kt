@@ -9,10 +9,7 @@ sealed class Screen(val route: String) {
     data object Detection : Screen("detection/{mode}") {
         fun createRoute(mode: String) = "detection/$mode"
     }
-    data object Result : Screen("result/{characterId}/{confidence}") {
-        fun createRoute(characterId: String, confidence: Float) =
-            "result/$characterId/$confidence"
-    }
+    data object Result : Screen("result")
     data object Encyclopedia : Screen("encyclopedia")
     data object CharacterDetail : Screen("character/{characterId}") {
         fun createRoute(characterId: String) = "character/$characterId"

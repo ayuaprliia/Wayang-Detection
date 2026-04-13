@@ -35,7 +35,7 @@ fun EncyclopediaScreen(
         debouncedQuery = searchQuery
     }
 
-    //  FILTER DI BACKGROUND THREAD
+    //  FILTER BACKGROUND THREAD
     val characters by produceState(
         initialValue = emptyList(),
         debouncedQuery,
