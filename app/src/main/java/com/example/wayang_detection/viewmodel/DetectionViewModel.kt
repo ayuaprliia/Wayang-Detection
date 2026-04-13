@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.wayang_detection.data.model.DetectionResult
 import com.example.wayang_detection.data.model.DetectionState
+import com.example.wayang_detection.detector.DetectionSmoother
 import com.example.wayang_detection.detector.ImageProcessor
 import com.example.wayang_detection.detector.WayangDetector
 import com.example.wayang_detection.util.Constants
@@ -21,10 +22,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * ViewModel for wayang detection using YOLOv11 TFLite model.
  * Supports real-time camera detection and single-shot gallery detection.
+ *
+ * Integrates DetectionSmoother for temporal stability:
+ * - EMA bounding box smoothing (reduces jitter)
+ * - IoU-based tracking (reduces flickering)
+ * - Class voting (reduces misclassification flicker)
  */
 class DetectionViewModel(application: Application) : AndroidViewModel(application) {
 
     private val detector = WayangDetector(application)
+    private val smoother = DetectionSmoother()
     private val isProcessing = AtomicBoolean(false)
 
     /** When true, camera frames are skipped (gallery detection in progress). */
@@ -56,7 +63,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     /**
      * Process a single camera frame for real-time detection.
      * Drops frames if previous inference is still running (keeps UI smooth).
-     * Called by CameraX ImageAnalysis.Analyzer on a background thread.
+     * Results are temporally smoothed via DetectionSmoother.
      */
     fun processFrame(imageProxy: ImageProxy) {
         // Drop frame if gallery detection is pending or previous frame still processing
@@ -74,17 +81,20 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 imageProxy.close() // Release camera buffer ASAP
 
                 // Run YOLOv11 inference
-                val results = detector.detect(bitmap, confidenceThreshold)
+                val rawResults = detector.detect(bitmap, confidenceThreshold)
                 bitmap.recycle()
+
+                // Temporal smoothing — reduces flickering and stabilizes boxes
+                val smoothedResults = smoother.smooth(rawResults)
 
                 val elapsed = System.currentTimeMillis() - startTime
 
                 // Update UI state
-                _liveResults.value = results
+                _liveResults.value = smoothedResults
                 _inferenceTimeMs.value = elapsed
                 _fps.value = (1000.0 / elapsed.coerceAtLeast(1L)).toInt()
-                _detectionState.value = if (results.isNotEmpty())
-                    DetectionState.Found(results) else DetectionState.Scanning
+                _detectionState.value = if (smoothedResults.isNotEmpty())
+                    DetectionState.Found(smoothedResults) else DetectionState.Scanning
             } catch (e: Exception) {
                 e.printStackTrace()
                 imageProxy.close()
@@ -96,7 +106,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     /**
      * Single-shot detection on an image from gallery/URI.
-     * Pauses camera frame processing while running.
+     * No temporal smoothing (single frame, no history needed).
      */
     fun detectFromUri(uri: Uri) {
         skipFrameProcessing = true
@@ -136,6 +146,7 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun resetDetection() {
         skipFrameProcessing = false
+        smoother.reset()
         _detectionState.value = DetectionState.Idle
         _liveResults.value = emptyList()
         _capturedResults.value = emptyList()

@@ -142,7 +142,12 @@ fun DetectionScreen(
         if (mode == "live" && hasCameraPermission) {
             AndroidView(
                 factory = { ctx ->
-                    val previewView = PreviewView(ctx)
+                    val previewView = PreviewView(ctx).apply {
+                        // FIT_CENTER: show full camera frame without cropping.
+                        // This ensures bounding box coordinates (0-1 normalized
+                        // to the full analysis frame) align correctly with the preview.
+                        scaleType = PreviewView.ScaleType.FIT_CENTER
+                    }
                     val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                     cameraProviderFuture.addListener({
                         val cameraProvider = cameraProviderFuture.get()
