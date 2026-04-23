@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.wayang_detection.data.model.DetectionResult
 import com.example.wayang_detection.data.model.DetectionState
+import com.example.wayang_detection.data.remote.OpenAiService
+import com.example.wayang_detection.data.repository.WayangRepository
 import com.example.wayang_detection.detector.DetectionSmoother
 import com.example.wayang_detection.detector.ImageProcessor
 import com.example.wayang_detection.detector.WayangDetector
@@ -27,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - EMA bounding box smoothing (reduces jitter)
  * - IoU-based tracking (reduces flickering)
  * - Class voting (reduces misclassification flicker)
+ *
+ * Also provides OpenAI GPT integration for AI-powered character descriptions.
  */
 class DetectionViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -60,6 +64,34 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
     private val _capturedResults = MutableStateFlow<List<DetectionResult>>(emptyList())
     val capturedResults: StateFlow<List<DetectionResult>> = _capturedResults.asStateFlow()
 
+    /** Latest processed raw bitmap ready to be captured. */
+    private var latestBitmap: android.graphics.Bitmap? = null
+
+    /** Frozen image sent to result screen. */
+    private val _capturedImage = MutableStateFlow<android.graphics.Bitmap?>(null)
+    val capturedImage: StateFlow<android.graphics.Bitmap?> = _capturedImage.asStateFlow()
+
+    /**
+     * Aspect ratio of the camera frame (width / height), after rotation.
+     * Used to correctly position bounding box overlay over FIT_CENTER preview.
+     */
+    private val _frameAspectRatio = MutableStateFlow(4f / 3f)
+    val frameAspectRatio: StateFlow<Float> = _frameAspectRatio.asStateFlow()
+
+    // ── AI / LLM State ──
+
+    /** AI response text for the current query. */
+    private val _aiResponse = MutableStateFlow<String?>(null)
+    val aiResponse: StateFlow<String?> = _aiResponse.asStateFlow()
+
+    /** Whether an AI request is in progress. */
+    private val _aiLoading = MutableStateFlow(false)
+    val aiLoading: StateFlow<Boolean> = _aiLoading.asStateFlow()
+
+    /** AI error message, if any. */
+    private val _aiError = MutableStateFlow<String?>(null)
+    val aiError: StateFlow<String?> = _aiError.asStateFlow()
+
     /**
      * Process a single camera frame for real-time detection.
      * Drops frames if previous inference is still running (keeps UI smooth).
@@ -80,8 +112,15 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
                 val bitmap = ImageProcessor.imageProxyToBitmap(imageProxy)
                 imageProxy.close() // Release camera buffer ASAP
 
+                // Update frame aspect ratio for overlay positioning
+                _frameAspectRatio.value = bitmap.width.toFloat() / bitmap.height.toFloat()
+
                 // Run YOLOv11 inference
                 val rawResults = detector.detect(bitmap, confidenceThreshold)
+                
+                // Deep copy latest bitmap for capture freeze
+                latestBitmap?.recycle()
+                latestBitmap = bitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
                 bitmap.recycle()
 
                 // Temporal smoothing — reduces flickering and stabilizes boxes
@@ -120,6 +159,9 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
 
                 if (bitmap != null) {
                     val results = detector.detect(bitmap, confidenceThreshold)
+                    
+                    _capturedImage.value?.recycle()
+                    _capturedImage.value = bitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
                     bitmap.recycle()
 
                     _liveResults.value = results
@@ -142,6 +184,80 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
      */
     fun captureCurrentResults() {
         _capturedResults.value = _liveResults.value.toList()
+        _capturedImage.value?.recycle()
+        _capturedImage.value = latestBitmap?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+    }
+
+    // ── AI / LLM Functions ──
+
+    /**
+     * Ask AI to elaborate on a detected wayang character.
+     * Used in ResultScreen for deeper insights.
+     */
+    fun askAiElaborate(characterId: String) {
+        val character = WayangRepository.getById(characterId) ?: return
+        val context = OpenAiService.buildCharacterContext(
+            name = character.name,
+            category = character.category.label,
+            group = character.group,
+            traits = character.traits,
+            description = character.description,
+            philosophy = character.philosophy
+        )
+        val question = "Jelaskan lebih detail dan mendalam tentang karakter wayang ${character.name}. " +
+                "Ceritakan tentang perannya dalam pewayangan Bali, kisah-kisah terkenal yang melibatkannya, " +
+                "dan makna filosofis yang terkandung dalam karakter ini bagi masyarakat Bali."
+
+        _aiLoading.value = true
+        _aiError.value = null
+        _aiResponse.value = null
+
+        viewModelScope.launch {
+            val result = OpenAiService.askAboutWayang(character.name, context, question)
+            result.onSuccess { response ->
+                _aiResponse.value = response
+            }.onFailure { error ->
+                _aiError.value = error.message ?: "Terjadi kesalahan"
+            }
+            _aiLoading.value = false
+        }
+    }
+
+    /**
+     * Ask AI a custom question about a wayang character.
+     * Used in CharacterDetailScreen for interactive Q&A.
+     */
+    fun askAiQuestion(characterId: String, question: String) {
+        val character = WayangRepository.getById(characterId) ?: return
+        val context = OpenAiService.buildCharacterContext(
+            name = character.name,
+            category = character.category.label,
+            group = character.group,
+            traits = character.traits,
+            description = character.description,
+            philosophy = character.philosophy
+        )
+
+        _aiLoading.value = true
+        _aiError.value = null
+        _aiResponse.value = null
+
+        viewModelScope.launch {
+            val result = OpenAiService.askAboutWayang(character.name, context, question)
+            result.onSuccess { response ->
+                _aiResponse.value = response
+            }.onFailure { error ->
+                _aiError.value = error.message ?: "Terjadi kesalahan"
+            }
+            _aiLoading.value = false
+        }
+    }
+
+    /** Clear AI response state. */
+    fun clearAiResponse() {
+        _aiResponse.value = null
+        _aiError.value = null
+        _aiLoading.value = false
     }
 
     fun resetDetection() {
@@ -152,6 +268,11 @@ class DetectionViewModel(application: Application) : AndroidViewModel(applicatio
         _capturedResults.value = emptyList()
         _fps.value = 0
         _inferenceTimeMs.value = 0L
+        _capturedImage.value?.recycle()
+        _capturedImage.value = null
+        latestBitmap?.recycle()
+        latestBitmap = null
+        clearAiResponse()
     }
 
     override fun onCleared() {

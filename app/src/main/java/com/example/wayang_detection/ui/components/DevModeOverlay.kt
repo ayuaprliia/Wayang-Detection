@@ -43,7 +43,7 @@ fun DevModeOverlay(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             Text(
-                text = "DEV  ●  FPS: $fps  │  ⏱ ${inferenceTimeMs}ms  │  📐 ${resolution}²  │  Threshold: ${(threshold * 100).toInt()}%",
+                text = "DEV  ●  ⏱ ${inferenceTimeMs}ms  │  📐 ${resolution}²  │  Threshold: ${(threshold * 100).toInt()}%",
                 color = Emerald,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,

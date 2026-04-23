@@ -61,6 +61,12 @@ private fun MainScreen() {
     val detectionState by detectionViewModel.detectionState.collectAsState()
     val fps by detectionViewModel.fps.collectAsState()
     val inferenceTimeMs by detectionViewModel.inferenceTimeMs.collectAsState()
+    val frameAspectRatio by detectionViewModel.frameAspectRatio.collectAsState()
+
+    // Collect AI state
+    val aiResponse by detectionViewModel.aiResponse.collectAsState()
+    val aiLoading by detectionViewModel.aiLoading.collectAsState()
+    val aiError by detectionViewModel.aiError.collectAsState()
 
     // Determine if bottom bar should be visible
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -144,19 +150,29 @@ private fun MainScreen() {
                     fps = fps,
                     inferenceTimeMs = inferenceTimeMs,
                     inputResolution = inputResolution,
-                    confidenceThreshold = confidenceThreshold
+                    confidenceThreshold = confidenceThreshold,
+                    frameAspectRatio = frameAspectRatio
                 )
             }
 
             // ── Result ──
             composable(route = Screen.Result.route) {
                 val capturedResults by detectionViewModel.capturedResults.collectAsState()
+                val capturedImage by detectionViewModel.capturedImage.collectAsState()
                 ResultScreen(
                     detectionResults = capturedResults,
+                    capturedImage = capturedImage,
                     onBack = { navController.popBackStack() },
                     onViewInEncyclopedia = { id ->
                         navController.navigate(Screen.CharacterDetail.createRoute(id))
-                    }
+                    },
+                    onAskAiElaborate = { characterId ->
+                        detectionViewModel.askAiElaborate(characterId)
+                    },
+                    aiResponse = aiResponse,
+                    aiLoading = aiLoading,
+                    aiError = aiError,
+                    onClearAiResponse = { detectionViewModel.clearAiResponse() }
                 )
             }
 
@@ -177,7 +193,14 @@ private fun MainScreen() {
                 val characterId = backStackEntry.arguments?.getString("characterId") ?: ""
                 CharacterDetailScreen(
                     characterId = characterId,
-                    onBack = { navController.popBackStack() }
+                    onBack = { navController.popBackStack() },
+                    onAskAi = { charId, question ->
+                        detectionViewModel.askAiQuestion(charId, question)
+                    },
+                    aiResponse = aiResponse,
+                    aiLoading = aiLoading,
+                    aiError = aiError,
+                    onClearAiResponse = { detectionViewModel.clearAiResponse() }
                 )
             }
         }

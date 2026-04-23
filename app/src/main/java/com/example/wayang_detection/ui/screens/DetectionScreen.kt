@@ -49,6 +49,9 @@ import java.util.concurrent.Executors
  * Detection screen supporting both live camera and gallery modes.
  * Live mode: CameraX ImageAnalysis sends frames for real-time YOLOv11 inference.
  * Gallery mode: single-shot inference on selected image.
+ *
+ * Bounding box overlay is positioned to match the FIT_CENTER camera preview area,
+ * using the frameAspectRatio to compute the active image region.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,7 +69,8 @@ fun DetectionScreen(
     fps: Int,
     inferenceTimeMs: Long,
     inputResolution: Int,
-    confidenceThreshold: Float
+    confidenceThreshold: Float,
+    frameAspectRatio: Float
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -221,33 +225,87 @@ fun DetectionScreen(
             }
         }
 
-        // Real-time bounding box overlay for all detected objects
+        // ── Bounding box overlay with correct positioning ──
+        // For live mode, compute the actual preview area within FIT_CENTER to align boxes.
+        // The preview shows the camera frame fitted inside the screen with letterboxing;
+        // the overlay must exactly cover that active region, not the full screen.
         if (liveResults.isNotEmpty()) {
-            BoundingBoxOverlay(
-                boundingBoxes = liveResults.map { it.boundingBox to it.characterName },
-                modifier = Modifier.fillMaxSize()
-            )
+            if (mode == "live") {
+                // Use BoxWithConstraints to measure the full screen size,
+                // then compute the actual image area based on frame aspect ratio
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val screenWidth = maxWidth
+                    val screenHeight = maxHeight
+                    val screenAspect = screenWidth / screenHeight
 
-            // Detection labels positioned near each bounding box
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                liveResults.forEach { result ->
-                    val labelX = maxWidth * result.boundingBox.left
-                    val rawY = maxHeight * result.boundingBox.top - 28.dp
-                    val labelY = if (rawY < 0.dp) 0.dp else rawY
+                    // Compute the image area within FIT_CENTER
+                    val (imageWidth, imageHeight) = if (frameAspectRatio > screenAspect) {
+                        // Frame is wider than screen → fit to width, pad top/bottom
+                        screenWidth to (screenWidth / frameAspectRatio)
+                    } else {
+                        // Frame is taller than screen → fit to height, pad left/right
+                        (screenHeight * frameAspectRatio) to screenHeight
+                    }
 
-                    Box(
+                    val offsetX = (screenWidth - imageWidth) / 2
+                    val offsetY = (screenHeight - imageHeight) / 2
+
+                    // Overlay positioned exactly over the preview image area
+                    BoundingBoxOverlay(
+                        boundingBoxes = liveResults.map { it.boundingBox to it.characterName },
                         modifier = Modifier
-                            .offset(x = labelX, y = labelY)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(BgPrimary.copy(alpha = 0.85f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "${result.characterName} ${(result.confidence * 100).toInt()}%",
-                            color = GoldPrimary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                            .offset(x = offsetX, y = offsetY)
+                            .size(width = imageWidth, height = imageHeight)
+                    )
+
+                    // Detection labels
+                    liveResults.forEach { result ->
+                        val labelX = offsetX + imageWidth * result.boundingBox.left
+                        val rawY = offsetY + imageHeight * result.boundingBox.top - 28.dp
+                        val labelY = if (rawY < 0.dp) 0.dp else rawY
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = labelX, y = labelY)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(BgPrimary.copy(alpha = 0.85f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${result.characterName} ${(result.confidence * 100).toInt()}%",
+                                color = GoldPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Gallery mode: overlay fills entire image area (Fit already matches)
+                BoundingBoxOverlay(
+                    boundingBoxes = liveResults.map { it.boundingBox to it.characterName },
+                    modifier = Modifier.fillMaxSize()
+                )
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    liveResults.forEach { result ->
+                        val labelX = maxWidth * result.boundingBox.left
+                        val rawY = maxHeight * result.boundingBox.top - 28.dp
+                        val labelY = if (rawY < 0.dp) 0.dp else rawY
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = labelX, y = labelY)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(BgPrimary.copy(alpha = 0.85f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "${result.characterName} ${(result.confidence * 100).toInt()}%",
+                                color = GoldPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -380,15 +438,8 @@ fun DetectionScreen(
                     }
                 }
 
-                // Gallery shortcut
-                IconButton(onClick = { galleryLauncher.launch("image/*") }) {
-                    Icon(
-                        imageVector = Icons.Rounded.PhotoLibrary,
-                        contentDescription = "Galeri",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
+                // Empty spacer to balance the flash toggle icon and keep capture button centered
+                Spacer(modifier = Modifier.size(48.dp))
             }
         }
     }

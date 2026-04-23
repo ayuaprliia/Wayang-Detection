@@ -1,5 +1,6 @@
 package com.example.wayang_detection.ui.screens
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,6 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,16 +30,38 @@ import com.example.wayang_detection.ui.theme.*
 
 /**
  * Full character detail screen with hero image, info sections,
- * traits, description, philosophy, and visual traits.
+ * traits, description, philosophy, visual traits, and AI Q&A.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CharacterDetailScreen(
     characterId: String,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onAskAi: (String, String) -> Unit, // (characterId, question)
+    aiResponse: String?,
+    aiLoading: Boolean,
+    aiError: String?,
+    onClearAiResponse: () -> Unit
 ) {
     val character = remember { WayangRepository.getById(characterId) }
     val scrollState = rememberScrollState()
+
+    // AI question input
+    var aiQuestion by remember { mutableStateOf("") }
+
+    // Suggested questions
+    val suggestedQuestions = remember(character?.name) {
+        listOf(
+            "Ceritakan kisah terkenal yang melibatkan ${character?.name ?: "karakter ini"}",
+            "Apa makna spiritual ${character?.name ?: "karakter ini"} dalam kehidupan sehari-hari?",
+            "Bagaimana ${character?.name ?: "karakter ini"} digambarkan dalam pertunjukan wayang?"
+        )
+    }
+
+    // Clear AI response when entering screen
+    LaunchedEffect(characterId) {
+        onClearAiResponse()
+    }
 
     if (character == null) {
         Box(
@@ -261,6 +286,182 @@ fun CharacterDetailScreen(
                                 fontSize = 13.sp,
                                 lineHeight = 20.sp
                             )
+                        }
+                    }
+                }
+
+                // ── AI Q&A Section ──
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Indigo.copy(alpha = 0.08f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        // Header
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = Indigo,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "🤖 Tanya AI",
+                                color = TextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "Tanyakan apa saja tentang ${character.name} kepada AI",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Suggested questions as chips
+                        Text(
+                            text = "Pertanyaan yang disarankan:",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        suggestedQuestions.forEach { question ->
+                            TextButton(
+                                onClick = {
+                                    aiQuestion = question
+                                    onAskAi(characterId, question)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !aiLoading,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "💬 $question",
+                                    color = if (aiLoading) TextMuted else Indigo,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Custom question input
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = aiQuestion,
+                                onValueChange = { aiQuestion = it },
+                                placeholder = {
+                                    Text(
+                                        "Ketik pertanyaanmu...",
+                                        color = TextMuted,
+                                        fontSize = 13.sp
+                                    )
+                                },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                enabled = !aiLoading,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Indigo,
+                                    unfocusedBorderColor = TextMuted.copy(alpha = 0.3f),
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    if (aiQuestion.isNotBlank()) {
+                                        onAskAi(characterId, aiQuestion)
+                                    }
+                                },
+                                enabled = aiQuestion.isNotBlank() && !aiLoading,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (aiQuestion.isNotBlank() && !aiLoading) Indigo
+                                        else TextMuted.copy(alpha = 0.2f)
+                                    )
+                            ) {
+                                if (aiLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = TextPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.Send,
+                                        contentDescription = "Kirim",
+                                        tint = TextPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // AI Response display
+                        AnimatedVisibility(
+                            visible = aiResponse != null || aiError != null,
+                            enter = fadeIn() + expandVertically(),
+                            exit = fadeOut() + shrinkVertically()
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (aiError != null) Coral.copy(alpha = 0.1f)
+                                            else BgElevated
+                                        )
+                                        .padding(12.dp)
+                                ) {
+                                    Column {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.AutoAwesome,
+                                                contentDescription = null,
+                                                tint = if (aiError != null) Coral else Indigo,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (aiError != null) "Error" else "Jawaban AI",
+                                                color = if (aiError != null) Coral else Indigo,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = aiError ?: aiResponse ?: "",
+                                            color = TextSecondary,
+                                            fontSize = 13.sp,
+                                            lineHeight = 20.sp
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
